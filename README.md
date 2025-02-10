@@ -1,134 +1,67 @@
-# RAG_with_Short_Term_and_Long_Term_Memory
+# GraphRAG with Conversational Memory 🤖💬
 
-import gradio as gr
-from langchain_community.chat_message_histories import Neo4jChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import StrOutputParser
-from langchain_community.graphs import Neo4jGraph
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.prompts.chat import MessagesPlaceholder
-from langchain.vectorstores import Neo4jVector
-from langchain_google_genai import ChatGoogleGenerativeAI
-from uuid import uuid4
-import os
-from dotenv import load_dotenv
-import asyncio
+## Overview
+GraphRAG is an advanced Retrieval-Augmented Generation (RAG) system that integrates Neo4j as a vector database to store and retrieve contextual information efficiently. This application enhances Generative AI capabilities by leveraging knowledge graphs and maintaining conversation history, enabling more context-aware and structured responses.
 
-# Load environment variables
-load_dotenv()
+## Tech Stack
+- **Neo4j** (Graph Database & Vector Store)
+- **LangChain** (Retrieval-Augmented Generation Framework)
+- **Gradio** (Interactive UI for chatbot)
+- **Google Gemini AI** (LLM-powered responses)
+- **Hugging Face Sentence Transformers** (Text embeddings)
+- **Python** (Backend development)
+- **Dotenv** (Environment variable management)
 
-# Initialize variables
-SESSION_ID = str(uuid4())
-print(f"Session ID: {SESSION_ID}")
+## Features
+- Stores and retrieves contextual knowledge using **Neo4j Vector Store**
+- Maintains **chat history** for contextual responses
+- Uses **Hugging Face embeddings** for efficient retrieval
+- Seamlessly integrates with **Google Gemini AI** for generating responses
+- Provides an **interactive chat interface** using Gradio
 
-# Neo4j graph setup
-graph = Neo4jGraph(
-    url="neo4j+s://6682e6ce.databases.neo4j.io",
-    username="neo4j",
-    password=os.getenv("NEO4J_PASSWORD")
-)
+## Installation & Setup
+### Prerequisites
+Ensure you have the following installed on your system:
+- Python 3.8+
+- Neo4j database (Cloud or Local Instance)
+- Google AI Studio API Key
 
-# HuggingFace embeddings
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2",
-    model_kwargs={'device': 'cpu'},
-    encode_kwargs={'normalize_embeddings': False}
-)
+### Steps to Run the App
+1. **Clone the Repository:**
+   ```bash
+   git clone https://github.com/your-username/GraphRAG.git
+   cd GraphRAG
+   ```
 
-# Create Neo4j VectorStore
-graph_store = Neo4jVector.from_existing_index(
-    embeddings,
-    graph=graph,
-    index_name="vector",
-    embedding_node_property="Embedding",
-    text_node_property="text",
-    retrieval_query="""
-// get the document
-MATCH (node)-[:PART_OF]->(d:Document)
-WITH node, score, d
+2. **Create a Virtual Environment (Optional but Recommended):**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows use: venv\Scripts\activate
+   ```
 
-// get the entities and relationships for the document
-MATCH (node)-[:HAS_ENTITY]->(e)
-MATCH p = (e)-[r]-(e2)
-WHERE (node)-[:HAS_ENTITY]->(e2)
+3. **Install Dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-// unwind the path, create a string of the entities and relationships
-UNWIND relationships(p) as rels
-WITH
-    node,
-    score,
-    d,
-    collect(apoc.text.join(
-        [labels(startNode(rels))[0], startNode(rels).id, type(rels), labels(endNode(rels))[0], endNode(rels).id]
-        ," ")) as kg
-RETURN
-    node.text as text, score,
-    {
-        document: d.id,
-        entities: kg
-    } AS metadata
-""")
-retriever = graph_store.as_retriever()
+4. **Set Up Environment Variables:**
+   Create a `.env` file in the root directory and add the following:
+   ```env
+   NEO4J_PASSWORD=your_neo4j_password
+   GOOGLE_AI_STUDIO_API_KEY=your_google_api_key
+   ```
 
-# Define Cypher Prompt
-CYPHER_PROMPT = """
-(
-    "Use the given context to provide an in-depth and structured response."
-    "Your answer should include:"
-    "- A clear and concise introduction to the topic."
-    "- Detailed explanation or relevant steps to address the query."
-    "- Practical examples or applications where possible."
-    "- A conclusion summarizing the main points."
-    "Format your response in sections with appropriate headings for clarity."
-    "Context: {context}"
-)
-"""
-prompt = ChatPromptTemplate.from_messages([
-    ("system", CYPHER_PROMPT),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{question}")
-])
+5. **Run the Application:**
+   ```bash
+   python app.py
+   ```
 
-# Helper function to retrieve context
-def get_retrieved_context(query: str) -> str:
-    retrieved_documents = retriever.get_relevant_documents(query)
-    context = "\n".join(doc.page_content for doc in retrieved_documents)
-    return context
+6. **Access the Chatbot:**
+   Open `http://127.0.0.1:7860` in your browser.
 
-def get_memory(session_id):
-    return Neo4jChatMessageHistory(session_id=session_id, graph=graph)
+## Contributing
+Feel free to contribute by submitting issues or pull requests. Any improvements to enhance retrieval, memory, or model integrations are welcome! 🚀
 
-def ReturnResponse(query: str) -> str:
-    llm =  ChatGoogleGenerativeAI(
-        model='gemini-2.0-flash-exp',
-        api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY")
-    )
-    chat_chain = prompt | llm | StrOutputParser()
+## License
+This project is licensed under the MIT License.
 
-    chat_with_message_history = RunnableWithMessageHistory(
-        chat_chain,
-        get_memory,
-        input_messages_key="question",
-        history_messages_key="chat_history",
-    )
-
-    context = get_retrieved_context(query)
-    response = chat_with_message_history.invoke({
-        "question": query,
-        "context": context,
-    }, config={
-        "configurable": {"session_id": SESSION_ID}
-    })
-
-    return gr.Markdown(response)
-
-
-iface = gr.Interface(
-    fn=ReturnResponse,
-    inputs=gr.Textbox(label="Enter your query:", placeholder="Type your question here..."),
-    outputs=gr.Markdown(label="Chatbot Response"),
-    title="GraphRAG with conversational Memory 🤖💬"
-)
-
-iface.launch()
