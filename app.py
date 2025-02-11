@@ -99,7 +99,7 @@ def get_memory(session_id):
 
 def ReturnResponse(query: str) -> str:
     llm =  ChatGoogleGenerativeAI(
-        model='gemini-2.0-flash-exp',
+        model='gemini-2.0-flash',
         api_key=os.getenv("GOOGLE_AI_STUDIO_API_KEY")
     )
     chat_chain = prompt | llm | StrOutputParser()
